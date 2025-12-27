@@ -4,101 +4,163 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ESP32 Spectrum Control</title>
-
 <style>
-:root{--bg:#0f0f0f;--card:#1a1a1a;--accent:#00d2ff;--text:#fff}
-body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex;justify-content:center;padding:20px}
-.card{width:100%;max-width:420px;background:var(--card);padding:20px;border-radius:14px}
-h2{text-align:center;color:var(--accent)}
-.status{text-align:center;margin-bottom:15px}
-button{width:100%;padding:12px;margin-top:8px;border:0;border-radius:8px;background:#333;color:#fff;font-weight:bold;cursor:pointer}
-button:hover{background:#444}
-button.connect{background:linear-gradient(90deg,#00d2ff,#3a7bd5)}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-label{font-size:.85em;color:#aaa}
-.value{text-align:center;font-size:.9em;color:#aaa;margin-top:5px}
-input[type="range"]{width:100%}
+:root {
+  --bg: #0f0f0f;
+  --card: #1a1a1a;
+  --accent: #00d2ff;
+  --text: #ffffff;
+}
+body {
+  font-family: system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+}
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--card);
+  padding: 20px;
+  border-radius: 14px;
+}
+h2 { text-align: center; color: var(--accent); }
+.status { text-align: center; margin-bottom: 15px; }
+button {
+  width: 100%;
+  padding: 12px;
+  margin-top: 8px;
+  border: none;
+  border-radius: 8px;
+  background: #333;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+button:hover { background: #444; }
+button.connect { background: linear-gradient(90deg, #00d2ff, #3a7bd5); }
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.value { text-align: center; font-size: 0.9em; color: #aaa; margin-bottom: 8px; }
 </style>
 </head>
-
 <body>
 <div class="card">
 
 <h2>ESP32 Spectrum</h2>
 <div id="status" class="status">🔴 Disconnected</div>
+
 <button class="connect" onclick="connectBLE()">CONNECT BLE</button>
+<button style="background:#aa2222" onclick="disconnectBLE()">DISCONNECT</button>
 
 <hr>
-
 <label>🎨 VISUALIZER MODE</label>
 <div class="grid">
-  <button onclick="sendData(0,0)">Rainbow</button>
-  <button onclick="sendData(0,1)">Outrun</button>
-  <button onclick="sendData(0,2)">Purple</button>
-  <button onclick="sendData(0,3)">Center</button>
-  <button onclick="sendData(0,4)">Dynamic</button>
-  <button onclick="sendData(0,5)">OFF</button>
+  <button onclick="setMode(0)">Rainbow</button>
+  <button onclick="setMode(1)">Outrun</button>
+  <button onclick="setMode(2)">Purple</button>
+  <button onclick="setMode(3)">Center</button>
+  <button onclick="setMode(4)">Dynamic</button>
+  <button onclick="setMode(5)">OFF</button>
 </div>
 
 <hr>
-
 <label>🔆 BRIGHTNESS</label>
 <div class="grid">
-  <button onclick="setBrightness(0)">LOW</button>
-  <button onclick="setBrightness(1)">MID</button>
-  <button onclick="setBrightness(2)">HIGH</button>
-  <button onclick="setBrightness(3)">OFF</button>
+  <button onclick="setBrightness(0)">Low</button>
+  <button onclick="setBrightness(1)">Medium</button>
+  <button onclick="setBrightness(2)">High</button>
 </div>
-<div class="value" id="brightVal">MID</div>
-
-<hr>
-
-<label>🎚 SENSITIVITY</label>
-<input type="range" min="500" max="3000" value="1000"
-       oninput="setSensitivity(this.value)">
-<div class="value" id="sensVal">1000</div>
+<div class="value" id="brightVal">Medium</div>
 
 </div>
 
 <script>
+// ===== UUID =====
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
-const CMD_MODE = 0;
-const CMD_BRIGHTNESS = 1;
-const CMD_SENSITIVITY = 2;
+// ===== COMMAND =====
+const CMD_MODE        = 0;
+const CMD_BRIGHTNESS  = 1;
 
-const BRIGHT_LABEL = ["LOW","MID","HIGH","OFF"];
+let bleDevice;
+let bleChar;
+let reconnectTimer;
 
-let bleDevice, bleChar;
+// ===== CONNECT =====
+async function connectBLE() {
+  try {
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'ESP32_Spectrum_Visualizer' }],
+      optionalServices: [SERVICE_UUID]
+    });
 
-async function connectBLE(){
-  const dev = await navigator.bluetooth.requestDevice({
-    filters:[{name:'ESP32_Spectrum_Visualizer'}],
-    optionalServices:[SERVICE_UUID]
-  });
-  const server = await dev.gatt.connect();
-  const service = await server.getPrimaryService(SERVICE_UUID);
-  bleChar = await service.getCharacteristic(CHARACTERISTIC_UUID);
-  document.getElementById("status").innerText="🟢 Connected";
-  dev.addEventListener('gattserverdisconnected',()=> {
-    document.getElementById("status").innerText="🔴 Disconnected";
-  });
+    const server = await bleDevice.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    bleChar = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+    document.getElementById("status").innerText = "🟢 Connected";
+
+    bleDevice.addEventListener('gattserverdisconnected', handleDisconnect);
+  } catch (e) {
+    console.log("BLE gagal: " + e);
+  }
 }
 
-async function sendData(cmd,val){
-  if(!bleChar) return;
-  await bleChar.writeValue(new Uint8Array([cmd,val]));
+// ===== DISCONNECT =====
+function disconnectBLE() {
+  if(bleDevice && bleDevice.gatt.connected) {
+    bleDevice.gatt.disconnect();
+    document.getElementById("status").innerText = "🔴 Disconnected";
+  }
 }
 
-function setBrightness(level){
-  document.getElementById("brightVal").innerText = BRIGHT_LABEL[level];
-  sendData(CMD_BRIGHTNESS, level);
+// ===== AUTO CONNECT ON PAGE LOAD =====
+window.addEventListener('load', async () => {
+  try { await connectBLE(); } catch(e) { console.log("Klik tombol CONNECT untuk BLE."); }
+});
+
+// ===== HANDLE DISCONNECT =====
+function handleDisconnect() {
+  document.getElementById("status").innerText = "🔴 Disconnected";
+  console.log("Disconnected, trying to reconnect...");
+  if(reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(autoReconnect, 2000);
 }
 
-function setSensitivity(val){
-  document.getElementById("sensVal").innerText = val;
-  sendData(CMD_SENSITIVITY, Math.min(255, Math.floor(val/12)));
+async function autoReconnect() {
+  if (!bleDevice) return;
+  try {
+    const server = await bleDevice.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    bleChar = await service.getCharacteristic(CHARACTERISTIC_UUID);
+    document.getElementById("status").innerText = "🟢 Reconnected";
+    console.log("Reconnect berhasil!");
+  } catch (e) {
+    console.log("Reconnect gagal, retry in 2s...");
+    reconnectTimer = setTimeout(autoReconnect, 2000);
+  }
+}
+
+// ===== SEND DATA =====
+async function sendData(cmd, val) {
+  if (!bleChar) return;
+  const data = new Uint8Array([cmd, parseInt(val)]);
+  await bleChar.writeValue(data);
+}
+
+// ===== HANDLERS =====
+function setMode(val) { sendData(CMD_MODE, val); }
+function setBrightness(val) { 
+  const names = ["Low","Medium","High"];
+  document.getElementById("brightVal").innerText = names[val]; 
+  sendData(CMD_BRIGHTNESS, val); 
 }
 </script>
 
